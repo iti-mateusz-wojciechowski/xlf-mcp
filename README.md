@@ -93,7 +93,10 @@ searches under `path`; pass `searchPath` (e.g. the repo root) to reuse across
 apps, and `includePackages: true` to also reuse translations shipped inside the
 `.app` files in `.alpackages` (Microsoft's System Application, ISV apps…).
 
-A source text translated more than one way is **not** guessed: the unit stays
+An untranslated copy (target identical to the source) is ignored when a real
+translation of the same text exists, so leftover English does not compete with
+it; on its own it is still used (`Bank` → `Bank`). A source text translated more
+than one way is **not** guessed: the unit stays
 empty and the candidates are listed with their counts. `ambiguous:
 "mostFrequent"` accepts a clear majority, never a tie. Filled targets get
 `stateMatched` (`needs-review-translation`), so they remain distinguishable

@@ -316,3 +316,19 @@ test('sync collapses a duplicate id to the translated copy, at the first positio
   assert.deepEqual(changes.duplicates, ['A']);
   assert.deepEqual(doc.units.map((u) => [u.id, u.target]), [['A', 'Alfa'], ['B', 'B']]);
 });
+
+test('xlf_apply_matches ignores an untranslated copy when a real translation exists, but accepts it alone', () => {
+  const root = workspace({
+    'A/TestApp.g.da-DK.xlf': file('da-DK', [
+      unit('A', 'Customer', { target: '', state: 'needs-translation' }),
+      unit('B', 'Bank', { target: '', state: 'needs-translation' }),
+    ]),
+    'B/X.g.da-DK.xlf': file('da-DK', [
+      unit('1', 'Customer', { target: 'Customer' }), unit('2', 'Customer', { target: 'Customer' }),
+      unit('3', 'Customer', { target: 'Debitor' }), unit('4', 'Bank', { target: 'Bank' }),
+    ]),
+  });
+  tool('xlf_apply_matches')({ path: join(root, 'A'), searchPath: root, write: true });
+  const doc = readXlf(join(root, 'A/TestApp.g.da-DK.xlf'));
+  assert.deepEqual(doc.units.map((u) => u.target), ['Debitor', 'Bank']);
+});
