@@ -87,9 +87,11 @@ function fillFromMemory(doc, memory, { state, qualifier, ambiguous }) {
   let unmatched = 0;
   const units = doc.units.map((u) => {
     if (!isEmptyTarget(u)) return u;
-    const byText = memory.get(sourceKey(u.source));
+    const key = sourceKey(u.source);
+    const byText = memory.get(key);
     if (!byText) { unmatched++; return u; }
-    const options = [...byText.values()].sort((a, b) => b.count - a.count);
+    let options = [...byText.values()].sort((a, b) => b.count - a.count);
+    if (options.some((o) => o.text.trim() !== key)) options = options.filter((o) => o.text.trim() !== key);
     if (options.length > 1 && (ambiguous !== 'mostFrequent' || options[0].count === options[1].count)) {
       conflicts.push({ id: u.id, source: decode(u.source), options });
       return u;
