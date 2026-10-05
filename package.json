@@ -1,0 +1,26 @@
+{
+  "name": "xlf-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for Business Central XLIFF translation files: sync targets with the source .g.xlf and fill empty targets from existing translations",
+  "type": "module",
+  "bin": {
+    "xlf-mcp": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/xlf.test.js",
+    "register": "node scripts/register.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iti-mateusz-wojciechowski/xlf-mcp.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  }
+}

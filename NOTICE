@@ -1,0 +1,8 @@
+xlf-mcp
+Copyright (c) 2026 Mateusz Wojciechowski
+
+The synchronisation rules (which state a new or changed unit gets, what is removed,
+how notes are carried over, how matches are applied) follow the behaviour of the
+XLF Editor extension for Visual Studio Code (aar.xlf-editor), Copyright (c) 2022
+Anpilogov Artem, licensed under the MIT License. No code from that project is
+included here; this is an independent implementation of the same rules.
