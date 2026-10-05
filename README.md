@@ -62,7 +62,7 @@ Start here. For each source file and each language beside it:
 - breakdown of `state` values
 - **out of sync**: units new in source, units whose source text changed, units
   gone from source, notes that changed
-- duplicate unit ids, unit order differing from source
+- duplicate unit ids, and the order the file follows (by id, by source, or none)
 - targets whose `%1`, `%2` placeholders differ from the source
 - targets whose `state` is not an XLIFF 1.2 value
 - the effective [settings](#configuration) and where each comes from
@@ -76,14 +76,15 @@ Start here. For each source file and each language beside it:
 | Unit is gone | Removed |
 | Developer or context note changed | Copied over |
 | Unit id appears twice in the language file | Collapsed to one copy, at the first position; a translated copy wins over an empty one |
-| Unit order differs | Left as it is; `reorder: true` puts every unit in source order |
+| Placement | Existing units never move. New units go where the file's own order puts them: by id if the file is sorted by id (the common convention), by source position if it follows the source, at the end otherwise |
 
 Source texts are compared with XML entities decoded and whitespace trimmed, so
 `&quot;` versus `"` is not a change. Units that need no change keep their exact
 bytes, and the file keeps its own BOM, line endings and indentation: a sync that
 adds eight units is an eight-unit diff.
 
-Parameters: `languages` (limit to some), `onSourceChange`, `reorder`, `write`.
+Parameters: `languages` (limit to some), `onSourceChange`, `order` (`auto` by
+default; `id` or `source` re-sorts every unit), `write`.
 
 ### `xlf_apply_matches` — reuse existing translations
 

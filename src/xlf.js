@@ -226,14 +226,20 @@ function withEol(block, eol) {
  *                          "review"), or emptied into `stateEmpty` ("clear")
  *   gone from source    -> removed
  *   note changed        -> copied from source (Developer, and Xliff Generator)
- * Existing units keep their place and new ones are appended, unless `reorder` puts
- * every unit in source order: a target stored in another order would otherwise be
- * rewritten end to end. Returns the new doc and a change log.
+ * Ordering (`order`):
+ *   "auto"   existing units stay exactly where they are; new ones are inserted
+ *            where the file's own order puts them -- by id when the file is
+ *            sorted by id, by source position when it follows the source, at
+ *            the end when it follows neither
+ *   "id"     every unit sorted by id
+ *   "source" every unit in source order
+ * Returns the new doc and a change log; `changes.order` is the detected order.
  */
 export function syncDocs(source, target, {
   stateEmpty = 'needs-translation', stateReview = 'needs-review-translation',
-  onSourceChange = 'review', reorder = false,
+  onSourceChange = 'review', order = 'auto',
 } = {}) {
+  if (!['auto', 'id', 'source'].includes(order)) throw new Error(`order must be "auto", "id" or "source", not "${order}"`);
   const changes = { added: [], sourceChanged: [], removed: [], notesUpdated: [], duplicates: [], reordered: false };
   const byId = new Map();
   for (const u of target.units) {
@@ -282,14 +288,60 @@ export function syncDocs(source, target, {
     if (!sourceIds.has(t.id)) changes.removed.push({ id: t.id, source: decode(t.source), target: decode(t.target) });
   }
   const keptOrder = [...new Set(target.units.filter((u) => sourceIds.has(u.id)).map((u) => u.id))];
-  const sourceOrder = source.units.filter((u) => byId.has(u.id)).map((u) => u.id);
-  changes.outOfOrder = keptOrder.some((id, i) => id !== sourceOrder[i]);
-  changes.reordered = reorder && changes.outOfOrder;
-  const units = reorder
-    ? source.units.map((u) => synced.get(u.id))
-    : [...keptOrder.map((id) => synced.get(id)), ...added];
+  const position = new Map(source.units.map((u, i) => [u.id, i]));
+  const bySource = (a, b) => position.get(a) - position.get(b);
+  changes.order = detectOrder(target.units.map((u) => u.id).filter((id) => position.has(id)), bySource);
+  const mode = order === 'auto' ? changes.order : order;
+  const cmp = mode === 'id' ? compareIds : mode === 'source' ? bySource : undefined;
+  let ids;
+  if (order === 'auto') {
+    const fresh = added.map((u) => u.id);
+    ids = cmp ? merge(keptOrder, fresh.sort(cmp), cmp) : [...keptOrder, ...fresh];
+  } else {
+    ids = source.units.map((u) => u.id).sort(cmp);
+  }
+  const keptAfter = ids.filter((x) => byId.has(x));
+  changes.reordered = order !== 'auto' && keptOrder.some((id, i) => id !== keptAfter[i]);
   changes.duplicates = [...new Set(changes.duplicates)];
-  return { doc: { ...target, units }, changes };
+  return { doc: { ...target, units: ids.map((id) => synced.get(id)) }, changes };
+}
+
+/** Plain string order on trans-unit ids, the order BC language files are commonly kept in. */
+export function compareIds(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function inversions(ids, cmp) {
+  let n = 0;
+  for (let i = 1; i < ids.length; i++) if (cmp(ids[i - 1], ids[i]) > 0) n++;
+  return n;
+}
+
+/**
+ * Which order a file's units follow: "id" (sorted by id), "source" (the source
+ * file's order) or "none". A handful of stray units -- left by an earlier
+ * append -- still counts as the order the rest of the file follows.
+ */
+export function detectOrder(ids, bySource) {
+  if (ids.length < 2) return 'source';
+  const tolerance = Math.max(2, Math.floor(ids.length / 100));
+  const sorted = inversions(ids, compareIds);
+  const src = inversions(ids, bySource);
+  if (src <= tolerance && src <= sorted) return 'source';
+  if (sorted <= tolerance) return 'id';
+  return 'none';
+}
+
+/** Merge new ids into an existing sequence without moving any existing one. */
+function merge(existing, fresh, cmp) {
+  const out = [];
+  let j = 0;
+  for (const id of existing) {
+    while (j < fresh.length && cmp(fresh[j], id) < 0) out.push(fresh[j++]);
+    out.push(id);
+  }
+  while (j < fresh.length) out.push(fresh[j++]);
+  return out;
 }
 
 /**

@@ -80,7 +80,7 @@ test('sync adds, keeps a changed target for review, removes, copies notes; untou
     unit('B', 'Beta', { target: 'Beta &quot;DK&quot;', state: 'translated' }),
     unit('X', 'Obsolete', { target: 'Forældet' }),
   ]));
-  const { doc, changes } = syncDocs(source, target, { reorder: true });
+  const { doc, changes } = syncDocs(source, target, { order: 'source' });
   assert.deepEqual(doc.units.map((u) => u.id), ['A', 'N', 'B', 'C']);
   assert.deepEqual(changes.added.map((c) => c.id), ['N']);
   assert.deepEqual(changes.sourceChanged.map((c) => [c.id, c.kept]), [['B', true]]);
@@ -104,13 +104,34 @@ test('sync with onSourceChange "clear" empties a changed target', () => {
   assert.match(doc.units[0].block, /<target state="needs-translation"><\/target>/);
 });
 
-test('sync without reorder keeps existing order and appends new units', () => {
-  const source = parseXlf(file('en-US', [unit('A', 'Alpha'), unit('N', 'New'), unit('B', 'Beta')]));
-  const target = parseXlf(file('da-DK', [unit('B', 'Beta', { target: 'B' }), unit('A', 'Alpha', { target: 'A' })]));
+test('sync inserts new units by id into a file sorted by id, without moving existing ones', () => {
+  const source = parseXlf(file('en-US', ['Page 9', 'Codeunit 5', 'Table 2', 'Enum 3', 'Report 1'].map((id) => unit(id, id))));
+  const target = parseXlf(file('da-DK', ['Codeunit 5', 'Page 9', 'Table 2'].map((id) => unit(id, id, { target: id }))));
   const { doc, changes } = syncDocs(source, target);
-  assert.deepEqual(doc.units.map((u) => u.id), ['B', 'A', 'N']);
-  assert.equal(changes.outOfOrder, true);
-  assert.equal(changes.reordered, false);
+  assert.equal(changes.order, 'id');
+  assert.deepEqual(doc.units.map((u) => u.id), ['Codeunit 5', 'Enum 3', 'Page 9', 'Report 1', 'Table 2']);
+});
+
+test('sync inserts new units at their source position into a file that follows the source', () => {
+  const ids = ['T 9', 'T 1', 'T 5', 'T 3', 'T 7'];
+  const source = parseXlf(file('en-US', ids.map((id) => unit(id, id))));
+  const target = parseXlf(file('da-DK', ['T 9', 'T 5', 'T 7'].map((id) => unit(id, id, { target: id }))));
+  const { doc, changes } = syncDocs(source, target);
+  assert.equal(changes.order, 'source');
+  assert.deepEqual(doc.units.map((u) => u.id), ids);
+});
+
+test('sync appends to a file in no recognisable order, and order "id" re-sorts everything', () => {
+  const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'];
+  const shuffled = ['a5', 'a2', 'a8', 'a1', 'a7', 'a3', 'a6'];
+  const source = parseXlf(file('en-US', ids.map((id) => unit(id, id))));
+  const target = parseXlf(file('da-DK', shuffled.map((id) => unit(id, id, { target: id }))));
+  const auto = syncDocs(source, target);
+  assert.equal(auto.changes.order, 'none');
+  assert.deepEqual(auto.doc.units.map((u) => u.id), [...shuffled, 'a4']);
+  const sorted = syncDocs(source, target, { order: 'id' });
+  assert.equal(sorted.changes.reordered, true);
+  assert.deepEqual(sorted.doc.units.map((u) => u.id), ids);
 });
 
 test('sync treats entity and whitespace differences in source as unchanged', () => {

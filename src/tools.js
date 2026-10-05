@@ -14,6 +14,11 @@ import { findSets, findTargetDocs, findPackageDocs, resolveInput } from './works
 import { resolveConfig, settings, describeConfig, CONFIG_FILE } from './config.js';
 
 const DEFAULT_SAMPLE = 20;
+const ORDER_TEXT = {
+  id: 'in id order (the file is sorted by id)',
+  source: 'in source order (the file follows the source)',
+  none: 'at the end (the file follows no recognisable order)',
+};
 const PREVIEW = 'Preview only -- nothing written (pass write: true to apply).';
 
 function rel(base, path) {
@@ -132,7 +137,7 @@ function status({ path, languages }) {
       out.push(outOfSync
         ? `    out of sync: +${changes.added.length} new, ${changes.sourceChanged.length} source changed, -${changes.removed.length} obsolete, ${changes.notesUpdated.length} notes`
         : '    in sync with source');
-      if (changes.outOfOrder) out.push('    unit order differs from source (harmless; xlf_sync reorder: true aligns it)');
+      out.push(`    order: ${{ id: 'sorted by id', source: 'follows the source', none: 'no recognisable order' }[changes.order]}`);
       if (changes.duplicates.length) out.push(`    duplicate ids (xlf_sync keeps one): ${changes.duplicates.join(', ')}`);
       if (mismatched) out.push(`    ${mismatched} targets whose %n placeholders differ from the source (xlf_list filter "placeholders")`);
       if (nonStandard) out.push(`    ${nonStandard} targets with a state outside XLIFF 1.2 (xlf_normalize_states converts them)`);
@@ -176,7 +181,7 @@ function list({ path, filter = 'empty', offset = 0, limit = 50 }) {
 
 // --- xlf_sync -------------------------------------------------------------------
 
-function sync({ path, languages, reorder = false, onSourceChange, write = false, maxItems = DEFAULT_SAMPLE }) {
+function sync({ path, languages, order = 'auto', onSourceChange, write = false, maxItems = DEFAULT_SAMPLE }) {
   const base = baseOf(path);
   const { sets, orphans } = findSets(path, { languages });
   if (!sets.length) return { text: `No source .g.xlf found under ${base}.` };
@@ -186,13 +191,14 @@ function sync({ path, languages, reorder = false, onSourceChange, write = false,
   let touched = 0;
   for (const s of sets) {
     for (const t of s.targets) {
-      const { doc, changes } = syncDocs(s.source, t, { ...cfg, reorder });
+      const { doc, changes } = syncDocs(s.source, t, { ...cfg, order });
       const any = changes.added.length || changes.removed.length || changes.sourceChanged.length
         || changes.notesUpdated.length || changes.reordered || changes.duplicates.length;
       out.push(`\n${rel(base, t.path)} (${t.targetLanguage}): ${any ? '' : 'already in sync'}`.trimEnd());
       if (!any) continue;
       touched++;
-      out.push(`  +${changes.added.length} new, ${changes.sourceChanged.length} source changed, -${changes.removed.length} obsolete, ${changes.notesUpdated.length} notes updated${changes.reordered ? ', reordered to source order' : ''}`);
+      out.push(`  +${changes.added.length} new, ${changes.sourceChanged.length} source changed, -${changes.removed.length} obsolete, ${changes.notesUpdated.length} notes updated${changes.reordered ? `, reordered by ${order}` : ''}`);
+      if (order === 'auto' && changes.added.length) out.push(`  new units inserted ${ORDER_TEXT[changes.order]}`);
       out.push(...sample(changes.added, maxItems, (c) => `    + ${c.id}: ${short(c.source)}`));
       out.push(...sample(changes.sourceChanged, maxItems, (c) => `    ~ ${c.id}: "${short(c.from, 40)}" -> "${short(c.to, 40)}"; target "${short(c.target, 40)}" ${c.kept ? 'kept for review' : 'emptied'}`));
       out.push(...sample(changes.removed, maxItems, (c) => `    - ${c.id}: ${short(c.source)}`));
@@ -407,14 +413,14 @@ export const TOOLS = [
   },
   {
     name: 'xlf_sync',
-    description: `Bring target .xlf files in line with their source .g.xlf: add units new in source (empty target), update the source text of changed units (old target kept and flagged for review, or emptied with onSourceChange "clear"), remove units gone from source, copy changed notes, collapse duplicate ids. Existing units keep their position; new ones are appended. Untouched units keep their exact bytes. ${STATES_NOTE} Preview by default.`,
+    description: `Bring target .xlf files in line with their source .g.xlf: add units new in source (empty target), update the source text of changed units (old target kept and flagged for review, or emptied with onSourceChange "clear"), remove units gone from source, copy changed notes, collapse duplicate ids. Existing units keep their position; new ones are inserted where the file's own order (by id, or by source) puts them. Untouched units keep their exact bytes. ${STATES_NOTE} Preview by default.`,
     inputSchema: {
       type: 'object',
       properties: {
         path: PATH,
         languages: LANGS,
         onSourceChange: { type: 'string', enum: ['review', 'clear'], description: 'Overrides the setting for this call' },
-        reorder: { type: 'boolean', description: 'Also put every unit in source order (default false; rewrites the whole file when the order differs)' },
+        order: { type: 'string', enum: ['auto', 'id', 'source'], description: 'auto (default): existing units stay put, new ones go where the file order (by id, or by source) puts them. id / source: re-sort every unit, which rewrites the file when its order differs' },
         write: WRITE,
         maxItems: MAX,
       },
