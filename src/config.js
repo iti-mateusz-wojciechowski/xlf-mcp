@@ -21,10 +21,11 @@ export const DEFAULTS = {
   stateReview: 'needs-review-translation',
   // Target filled from an existing translation of the identical source text.
   stateMatched: 'needs-review-translation',
-  qualifierMatched: 'exact-match',
+  // XLIFF state-qualifier, off by default: valid, but rarely used in BC apps.
+  qualifierMatched: null,
   // Target written by xlf_set_targets (an agent's or a person's translation).
   stateWritten: 'needs-review-translation',
-  qualifierWritten: 'mt-suggestion',
+  qualifierWritten: null,
   // What a source change does to the existing target: "review" keeps it, "clear" empties it.
   onSourceChange: 'review',
 };

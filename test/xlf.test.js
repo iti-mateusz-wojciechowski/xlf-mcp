@@ -159,7 +159,7 @@ test('xlf_apply_matches fills a unique match with an exact-match qualifier, skip
   assert.match(out.text, /1 filled, 1 ambiguous, 1 with no match/);
   const doc = readXlf(target);
   const get = (id) => doc.units.find((u) => u.id === id);
-  assert.match(get('A').block, /<target state="needs-review-translation" state-qualifier="exact-match">Debitor &amp; "kunde"<\/target>/);
+  assert.match(get('A').block, /<target state="needs-review-translation">Debitor &amp; "kunde"<\/target>/);
   assert.equal(get('B').target, '');
   assert.equal(get('C').target, 'Vare');
 });
@@ -175,14 +175,14 @@ test('xlf_apply_matches mostFrequent takes a clear majority, not a tie', () => {
   assert.equal(readXlf(join(root, 'A/TestApp.g.da-DK.xlf')).units[0].target, 'Ordre');
 });
 
-test('xlf_set_targets escapes markup, keeps quotes literal, qualifies as mt-suggestion, flags placeholder loss', () => {
+test('xlf_set_targets escapes markup, keeps quotes literal, writes a qualifier only when asked, flags placeholder loss', () => {
   const root = workspace({ 'T.g.da-DK.xlf': file('da-DK', [
     unit('A', 'A &lt; B', { target: '', state: 'needs-translation' }),
     unit('P', 'Order %1 of %2', { target: '', state: 'needs-translation' }),
   ]) });
   const path = join(root, 'T.g.da-DK.xlf');
   const out = tool('xlf_set_targets')({ path, write: true, entries: [
-    { id: 'A', target: 'A < B "x" & y' },
+    { id: 'A', target: 'A < B "x" & y', qualifier: 'mt-suggestion' },
     { id: 'P', target: 'Ordre %1', state: 'translated', qualifier: '' },
   ] });
   const text = readFileSync(path, 'utf8');
@@ -242,7 +242,7 @@ test('xlf_create writes <App>.g.<lang>.xlf with every unit empty, prefilled, and
   assert.equal(doc.targetLanguage, 'sv-SE');
   assert.equal(doc.original, 'TestApp');
   assert.deepEqual(doc.units.map((u) => [u.id, u.target, u.state, u.qualifier]), [
-    ['A', 'Kund', 'needs-review-translation', 'exact-match'],
+    ['A', 'Kund', 'needs-review-translation', undefined],
     ['B', '', 'needs-translation', undefined],
   ]);
   assert.match(tool('xlf_status')({ path: join(root, 'A') }).text, /sv-SE[\s\S]*in sync with source/);
@@ -281,5 +281,26 @@ test('server answers tools/list over stdio', async () => {
   const list = await got;
   child.kill();
   assert.deepEqual(list.result.tools.map((t) => t.name).sort(),
-    ['xlf_apply_matches', 'xlf_create', 'xlf_find', 'xlf_list', 'xlf_set_targets', 'xlf_status', 'xlf_sync']);
+    ['xlf_apply_matches', 'xlf_create', 'xlf_find', 'xlf_list', 'xlf_normalize_states', 'xlf_set_targets', 'xlf_status', 'xlf_sync']);
+});
+
+test('xlf_normalize_states maps non-standard states and keeps target bytes', () => {
+  const root = workspace({
+    'T.g.xlf': file('en-US', [unit('A', 'Alpha'), unit('B', 'Beta'), unit('C', 'Gamma'), unit('D', 'Delta')]),
+    'T.g.da-DK.xlf': file('da-DK', [
+      unit('A', 'Alpha', { target: 'Alfa &quot;x&quot;', state: '' }),
+      unit('B', 'Beta', { target: '', state: '' }),
+      unit('C', 'Gamma', { target: 'Gamma', state: 'ai-translated' }),
+      unit('D', 'Delta', { target: 'Delta', state: 'signed-off' }),
+    ]),
+  });
+  const path = join(root, 'T.g.da-DK.xlf');
+  assert.throws(() => tool('xlf_normalize_states')({ path: root, map: { '': 'done' } }), /not an XLIFF 1.2 state/);
+  tool('xlf_normalize_states')({ path: root, map: { 'ai-translated': 'needs-review-translation' }, write: true });
+  const text = readFileSync(path, 'utf8');
+  assert.match(text, /<target state="translated">Alfa &quot;x&quot;<\/target>/);
+  assert.match(text, /<target state="needs-translation"><\/target>/);
+  assert.match(text, /<target state="needs-review-translation">Gamma<\/target>/);
+  assert.match(text, /<target state="signed-off">Delta<\/target>/);
+  assert.match(tool('xlf_normalize_states')({ path: root }).text, /already an XLIFF 1.2 value/);
 });

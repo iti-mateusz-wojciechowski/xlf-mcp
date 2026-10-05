@@ -96,8 +96,8 @@ apps, and `includePackages: true` to also reuse translations shipped inside the
 A source text translated more than one way is **not** guessed: the unit stays
 empty and the candidates are listed with their counts. `ambiguous:
 "mostFrequent"` accepts a clear majority, never a tie. Filled targets get
-`stateMatched` and `qualifierMatched` (`exact-match`), so they remain
-distinguishable from reviewed work.
+`stateMatched` (`needs-review-translation`), so they remain distinguishable
+from reviewed work.
 
 ### `xlf_list` — read units for translation or review
 
@@ -109,8 +109,8 @@ context. `filter`: `empty` (default), `needs-any` (empty, or state `needs-*`),
 
 Writes translations by unit id, for whatever no match could fill — typically an
 agent translating the output of `xlf_list`. Text is plain; escaping is done
-here. Targets get `stateWritten` and `qualifierWritten` (`mt-suggestion`) unless
-an entry sets its own `state` / `qualifier`. A placeholder mismatch is flagged.
+here. Targets get `stateWritten` (`needs-review-translation`) unless an entry
+sets its own `state` / `qualifier`. A placeholder mismatch is flagged.
 
 ### `xlf_find` — look a text up
 
@@ -118,6 +118,15 @@ Shows how a source text is already translated across the repo (and optionally
 `.alpackages`): each distinct translation, how often, where, in which state.
 `match`: `exact`, `ignoreCase` or `contains`. Use it to keep terminology
 consistent before writing a translation.
+
+### `xlf_normalize_states` — convert to standard states
+
+Replaces every target state that is not an XLIFF 1.2 value — typically
+`state=""` left by older tooling — with a standard one: a filled target becomes
+`filledState` (default `translated`), an empty one `stateEmpty`. `map` sets an
+explicit replacement per old value, e.g. `{ "ai-translated":
+"needs-review-translation" }`. Only the attribute changes; the text keeps its
+bytes. Run it once when adopting standard states.
 
 ### `xlf_create` — add a language
 
@@ -147,13 +156,14 @@ spec's values are:
 Any other value must start with `x-` (e.g. `x-customer-approved`). An empty
 `state=""` is not a valid value; `xlf_status` reports such targets.
 
-| `state-qualifier` | Used here for |
-|---|---|
-| `exact-match` | A target reused from an identical source text (`xlf_apply_matches`, `xlf_create`) |
-| `mt-suggestion` | A target written by an agent (`xlf_set_targets`) |
+`state-qualifier` (e.g. `exact-match`, `fuzzy-match`, `leveraged-tm`,
+`mt-suggestion`) records how a translation was produced. It is valid XLIFF but
+rarely used in Business Central apps, so it is **off by default**; set
+`qualifierMatched` / `qualifierWritten` to turn it on.
 
-The spec defines more (`fuzzy-match`, `leveraged-tm`, `leveraged-inherited`,
-`id-match`, …); any of them can be configured.
+In practice: Microsoft's shipped translations mark every target `translated`;
+some ISVs use `state` as a real workflow (machine output, developer draft,
+`signed-off`). Both are reasons to keep it accurate.
 
 **What Business Central does with them:** Microsoft's documentation on
 translation files describes only `<source>`, `<target>` and `target-language`
@@ -167,8 +177,8 @@ should be accurate.
 |---|---|---|
 | Unit new in source, or target emptied by a source change | `stateEmpty` | `needs-translation` |
 | Source changed, old target kept for the translator | `stateReview` | `needs-review-translation` |
-| Filled from an identical source text | `stateMatched` / `qualifierMatched` | `needs-review-translation` / `exact-match` |
-| Written by `xlf_set_targets` | `stateWritten` / `qualifierWritten` | `needs-review-translation` / `mt-suggestion` |
+| Filled from an identical source text | `stateMatched` / `qualifierMatched` | `needs-review-translation` / none |
+| Written by `xlf_set_targets` | `stateWritten` / `qualifierWritten` | `needs-review-translation` / none |
 
 Nothing this server writes is `translated` or later by default: promoting a
 target is a reviewer's decision. A team that does not review reused matches can
@@ -187,9 +197,9 @@ Settings are resolved **per call, key by key**, first hit wins:
   "stateEmpty": "needs-translation",
   "stateReview": "needs-review-translation",
   "stateMatched": "translated",
-  "qualifierMatched": "exact-match",
+  "qualifierMatched": null,
   "stateWritten": "needs-review-translation",
-  "qualifierWritten": "mt-suggestion",
+  "qualifierWritten": null,
   "onSourceChange": "review"
 }
 ```
@@ -231,7 +241,8 @@ then `xlf_list` / `xlf_set_targets` for the rest.
   translation must never reach users.
 - **Use `state` honestly.** Machine output and reused matches are suggestions
   until someone reviews them; `needs-review-translation` plus a qualifier keeps
-  them findable. `state=""` carries no information.
+  them findable. `state=""` carries no information; `xlf_normalize_states`
+  converts it.
 - **Keep placeholders intact.** `%1`, `%2` are filled at runtime; a target that
   drops or adds one shows wrong or missing values. `xlf_status` counts
   mismatches, `xlf_list filter: "placeholders"` lists them.

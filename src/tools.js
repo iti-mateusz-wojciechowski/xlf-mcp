@@ -8,7 +8,7 @@ import { relative, resolve, dirname, basename, join } from 'node:path';
 import { existsSync } from 'node:fs';
 import {
   readXlf, writeXlf, syncDocs, setTarget, parseUnit, decode, sourceKey, isEmptyTarget,
-  isSourceDoc, createTargetDoc, placeholders, isStandardState,
+  isSourceDoc, createTargetDoc, placeholders, isStandardState, restateTarget,
 } from './xlf.js';
 import { findSets, findTargetDocs, findPackageDocs, resolveInput } from './workspace.js';
 import { resolveConfig, settings, describeConfig, CONFIG_FILE } from './config.js';
@@ -133,7 +133,7 @@ function status({ path, languages }) {
       if (changes.outOfOrder) out.push('    unit order differs from source (harmless; xlf_sync reorder: true aligns it)');
       if (changes.duplicates.length) out.push(`    duplicate ids (xlf_sync keeps one): ${changes.duplicates.join(', ')}`);
       if (mismatched) out.push(`    ${mismatched} targets whose %n placeholders differ from the source (xlf_list filter "placeholders")`);
-      if (nonStandard) out.push(`    ${nonStandard} targets with a state outside XLIFF 1.2 (not a listed value, not "x-…")`);
+      if (nonStandard) out.push(`    ${nonStandard} targets with a state outside XLIFF 1.2 (xlf_normalize_states converts them)`);
     }
   }
   for (const o of orphans) {
@@ -329,6 +329,45 @@ function create({
   return { text: out.join('\n') };
 }
 
+// --- xlf_normalize_states -------------------------------------------------------
+
+/**
+ * Replace every state outside XLIFF 1.2 with a standard one. Without a `map`, a
+ * filled target becomes `filledState` and an empty one `stateEmpty`; a `map`
+ * entry ({ "old": "new" }) wins for the values it names. Only the state attribute
+ * changes; target text keeps its exact bytes.
+ */
+function normalizeStates({ path, languages, map = {}, filledState = 'translated', write = false, maxItems = DEFAULT_SAMPLE }) {
+  const base = baseOf(path);
+  const { sets, orphans } = findSets(path, { languages });
+  const targets = [...sets.flatMap((s) => s.targets), ...orphans];
+  if (!targets.length) return { text: `No target .xlf found under ${base}.` };
+  const cfg = settings(base);
+  for (const [from, to] of Object.entries(map)) {
+    if (!isStandardState(to)) throw new Error(`map "${from}" -> "${to}": "${to}" is not an XLIFF 1.2 state`);
+  }
+  if (!isStandardState(filledState)) throw new Error(`filledState "${filledState}" is not an XLIFF 1.2 state`);
+  const out = [write ? 'Normalised:' : PREVIEW];
+  let total = 0;
+  for (const t of targets) {
+    const moves = {};
+    const units = t.units.map((u) => {
+      if (!u.hasTarget || u.state === undefined || isStandardState(u.state)) return u;
+      const to = map[u.state] ?? (isEmptyTarget(u) ? cfg.stateEmpty : filledState);
+      const key = `"${u.state}" -> "${to}"${isEmptyTarget(u) ? ' (empty)' : ''}`;
+      moves[key] = (moves[key] || 0) + 1;
+      return parseUnit(restateTarget(u.block, to));
+    });
+    const count = Object.values(moves).reduce((a, b) => a + b, 0);
+    total += count;
+    out.push(`\n${rel(base, t.path)} (${t.targetLanguage}): ${count ? `${count} states changed` : 'all states already standard'}`);
+    out.push(...sample(Object.entries(moves), maxItems, ([k, v]) => `    ${k}: ${v}`));
+    if (write && count) writeXlf({ ...t, units });
+  }
+  if (!total) return { text: 'Every target state is already an XLIFF 1.2 value.' };
+  return { text: out.join('\n') };
+}
+
 // --- schemas --------------------------------------------------------------------
 
 const PATH = { type: 'string', description: 'A repo root, an app folder, a Translations folder, or one .xlf file' };
@@ -461,5 +500,22 @@ export const TOOLS = [
       required: ['path', 'languages'],
     },
     handler: create,
+  },
+  {
+    name: 'xlf_normalize_states',
+    description: 'Replace target states that are not XLIFF 1.2 values (e.g. state="") with standard ones: a filled target becomes filledState (default "translated"), an empty one the configured stateEmpty; map ({ "old": "new" }) overrides per value. Only the attribute changes, text keeps its bytes. Preview by default.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: PATH,
+        languages: LANGS,
+        filledState: { type: 'string', description: 'State for a filled target with a non-standard state (default "translated")' },
+        map: { type: 'object', additionalProperties: { type: 'string' }, description: 'Explicit old -> new state values, e.g. { "ai-translated": "needs-review-translation" }' },
+        write: WRITE,
+        maxItems: MAX,
+      },
+      required: ['path'],
+    },
+    handler: normalizeStates,
   },
 ];

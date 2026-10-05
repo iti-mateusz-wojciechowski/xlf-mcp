@@ -189,7 +189,7 @@ export function setTarget(block, text, state, eol, qualifier) {
 }
 
 /** Change only the state of an existing target; its text keeps its exact bytes. */
-function restateTarget(block, state) {
+export function restateTarget(block, state) {
   const tgt = block.match(TARGET_RE);
   if (!tgt) return block;
   return block.slice(0, tgt.index) + targetElement(tgt[2] ?? '', state) + block.slice(tgt.index + tgt[0].length);
