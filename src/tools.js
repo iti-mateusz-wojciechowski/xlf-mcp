@@ -194,7 +194,7 @@ function sync({ path, languages, reorder = false, onSourceChange, write = false,
       out.push(...sample(changes.added, maxItems, (c) => `    + ${c.id}: ${short(c.source)}`));
       out.push(...sample(changes.sourceChanged, maxItems, (c) => `    ~ ${c.id}: "${short(c.from, 40)}" -> "${short(c.to, 40)}"; target "${short(c.target, 40)}" ${c.kept ? 'kept for review' : 'emptied'}`));
       out.push(...sample(changes.removed, maxItems, (c) => `    - ${c.id}: ${short(c.source)}`));
-      if (changes.duplicates.length) out.push(`  duplicate ids collapsed to the first: ${changes.duplicates.join(', ')}`);
+      if (changes.duplicates.length) out.push(`  duplicate ids collapsed to one copy (a translated copy wins over an empty one): ${changes.duplicates.join(', ')}`);
       if (write) {
         const ids = new Set(doc.units.map((u) => u.id));
         if (ids.size !== doc.units.length || ids.size !== s.source.units.length || s.source.units.some((u) => !ids.has(u.id))) {

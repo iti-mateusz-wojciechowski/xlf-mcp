@@ -304,3 +304,15 @@ test('xlf_normalize_states maps non-standard states and keeps target bytes', () 
   assert.match(text, /<target state="signed-off">Delta<\/target>/);
   assert.match(tool('xlf_normalize_states')({ path: root }).text, /already an XLIFF 1.2 value/);
 });
+
+test('sync collapses a duplicate id to the translated copy, at the first position', () => {
+  const source = parseXlf(file('en-US', [unit('A', 'Alpha'), unit('B', 'Beta')]));
+  const target = parseXlf(file('da-DK', [
+    unit('A', 'Alpha', { target: '', state: 'needs-translation' }),
+    unit('B', 'Beta', { target: 'B' }),
+    unit('A', 'Alpha', { target: 'Alfa', state: 'translated' }),
+  ]));
+  const { doc, changes } = syncDocs(source, target);
+  assert.deepEqual(changes.duplicates, ['A']);
+  assert.deepEqual(doc.units.map((u) => [u.id, u.target]), [['A', 'Alfa'], ['B', 'B']]);
+});

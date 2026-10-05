@@ -237,8 +237,13 @@ export function syncDocs(source, target, {
   const changes = { added: [], sourceChanged: [], removed: [], notesUpdated: [], duplicates: [], reordered: false };
   const byId = new Map();
   for (const u of target.units) {
-    if (byId.has(u.id)) changes.duplicates.push(u.id);
-    else byId.set(u.id, u);
+    const first = byId.get(u.id);
+    if (!first) {
+      byId.set(u.id, u);
+      continue;
+    }
+    changes.duplicates.push(u.id);
+    if (isEmptyTarget(first) && !isEmptyTarget(u)) byId.set(u.id, u);
   }
   const sourceIds = new Set(source.units.map((u) => u.id));
   const synced = new Map();

@@ -75,7 +75,7 @@ Start here. For each source file and each language beside it:
 | Source text changed | Source updated. Old target **kept** and set to `stateReview`, so the translator sees what it said — or emptied into `stateEmpty` with `onSourceChange: "clear"` |
 | Unit is gone | Removed |
 | Developer or context note changed | Copied over |
-| Unit id appears twice in the language file | Collapsed to the first |
+| Unit id appears twice in the language file | Collapsed to one copy, at the first position; a translated copy wins over an empty one |
 | Unit order differs | Left as it is; `reorder: true` puts every unit in source order |
 
 Source texts are compared with XML entities decoded and whitespace trimmed, so
