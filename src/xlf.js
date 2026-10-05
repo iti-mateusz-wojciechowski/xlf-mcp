@@ -4,8 +4,8 @@
 // holding flat <trans-unit> blocks. Treating each block as a string, and only
 // rewriting the element that actually changes, keeps every untouched byte as it
 // was -- BOM, line endings, indentation, attribute order, self-closing notes. A
-// DOM parse + serialise (what XLF Editor does) reformats the whole file, so a
-// one-unit change shows up as a thousand-line diff.
+// DOM parse and re-serialise reformats the whole file, so a one-unit change would
+// show up as a thousand-line diff.
 
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 
@@ -14,9 +14,19 @@ const ID_RE = /^<trans-unit\b[^>]*?\bid="([^"]*)"/;
 const SOURCE_RE = /<source\b[^>]*?(?:\/>|>([\s\S]*?)<\/source>)/;
 const TARGET_RE = /<target\b([^>]*?)(?:\/>|>([\s\S]*?)<\/target>)/;
 const STATE_RE = /\bstate="([^"]*)"/;
+const QUALIFIER_RE = /\bstate-qualifier="([^"]*)"/;
+const BOM = '﻿';
 
-export const STATE_EMPTY = 'needs-translation';
-export const STATE_FILLED = 'needs-review-translation';
+/** XLIFF 1.2 `state` values; anything else must start with "x-". */
+export const XLIFF_STATES = [
+  'new', 'needs-translation', 'needs-adaptation', 'needs-l10n',
+  'needs-review-translation', 'needs-review-adaptation', 'needs-review-l10n',
+  'translated', 'signed-off', 'final',
+];
+
+export function isStandardState(state) {
+  return XLIFF_STATES.includes(state) || /^x-.+/.test(state ?? '');
+}
 
 /** Decode the XML entities an XLIFF text node can carry. */
 export function decode(text) {
@@ -33,7 +43,7 @@ export function decode(text) {
   });
 }
 
-/** Encode for a <target> text node: quotes stay literal, as XLF Editor writes them. */
+/** Encode for a text node. Quotes need no escaping in element content, so they stay literal. */
 export function encode(text) {
   return String(text ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -41,6 +51,11 @@ export function encode(text) {
 /** Comparison key for source texts: decoded and trimmed. */
 export function sourceKey(text) {
   return decode(text).trim();
+}
+
+/** BC placeholders (%1, %2, …) in a text, sorted, for comparing source and target. */
+export function placeholders(text) {
+  return (decode(text).match(/%\d+/g) || []).sort().join(' ');
 }
 
 function noteRe(from) {
@@ -56,13 +71,15 @@ export function parseUnit(block) {
   const tgt = block.match(TARGET_RE);
   const dev = block.match(DEV_NOTE_RE);
   const gen = block.match(GEN_NOTE_RE);
+  const attrs = tgt ? tgt[1] || '' : '';
   return {
     id,
     block,
     source: src ? src[1] ?? '' : '',
     hasTarget: !!tgt,
     target: tgt ? tgt[2] ?? '' : '',
-    state: tgt ? ((tgt[1] || '').match(STATE_RE) || [])[1] : undefined,
+    state: tgt ? (attrs.match(STATE_RE) || [])[1] : undefined,
+    qualifier: tgt ? (attrs.match(QUALIFIER_RE) || [])[1] : undefined,
     devNote: dev ? { element: dev[0], text: dev[1] ?? '' } : undefined,
     genNote: gen ? { element: gen[0], text: gen[1] ?? '' } : undefined,
   };
@@ -74,7 +91,7 @@ export function parseUnit(block) {
  * whenever the inter-unit whitespace is uniform, which it is for generated files.
  */
 export function parseXlf(text, path = '<memory>') {
-  const bom = text.charCodeAt(0) === 0xfeff;
+  const bom = text.startsWith(BOM);
   const body = bom ? text.slice(1) : text;
   const eol = body.includes('\r\n') ? '\r\n' : '\n';
   const fileTag = (body.match(/<file\b[^>]*>/) || [''])[0];
@@ -125,8 +142,8 @@ export function readXlf(path) {
 export function serializeXlf(doc) {
   const text = doc.units.length
     ? doc.prefix + doc.units.map((u) => u.block).join(doc.separator) + doc.suffix
-    : doc.prefix.replace(/s+$/, '') + doc.suffix;
-  return (doc.bom ? '﻿' : '') + text;
+    : doc.prefix.replace(/\s+$/, '') + doc.suffix;
+  return (doc.bom ? BOM : '') + text;
 }
 
 /** Write via a temp file and rename, so a crash never leaves half a file. */
@@ -141,14 +158,26 @@ export function isSourceDoc(doc) {
   return !doc.targetLanguage || doc.targetLanguage === doc.sourceLanguage;
 }
 
+export function isEmptyTarget(u) {
+  return !u.hasTarget || decode(u.target).trim() === '';
+}
+
 function lineIndent(block, index) {
   const lineStart = block.lastIndexOf('\n', index - 1) + 1;
   return (block.slice(lineStart, index).match(/^[ \t]*/) || [''])[0];
 }
 
-/** Return the block with its <target> replaced, or inserted after </source> if absent. */
-export function setTarget(block, text, state, eol) {
-  const element = `<target state="${state}">${encode(text)}</target>`;
+function targetElement(rawText, state, qualifier) {
+  const q = qualifier ? ` state-qualifier="${qualifier}"` : '';
+  return `<target state="${state}"${q}>${rawText}</target>`;
+}
+
+/**
+ * Return the block with its <target> replaced, or inserted after </source> when it
+ * has none. `qualifier` (XLIFF state-qualifier) is written only when given.
+ */
+export function setTarget(block, text, state, eol, qualifier) {
+  const element = targetElement(encode(text), state, qualifier);
   const tgt = block.match(TARGET_RE);
   if (tgt) {
     return block.slice(0, tgt.index) + element + block.slice(tgt.index + tgt[0].length);
@@ -157,6 +186,13 @@ export function setTarget(block, text, state, eol) {
   if (!src) throw new Error('trans-unit has no <source>');
   const at = src.index + src[0].length;
   return block.slice(0, at) + eol + lineIndent(block, src.index) + element + block.slice(at);
+}
+
+/** Change only the state of an existing target; its text keeps its exact bytes. */
+function restateTarget(block, state) {
+  const tgt = block.match(TARGET_RE);
+  if (!tgt) return block;
+  return block.slice(0, tgt.index) + targetElement(tgt[2] ?? '', state) + block.slice(tgt.index + tgt[0].length);
 }
 
 export function setSource(block, rawSource) {
@@ -183,17 +219,21 @@ function withEol(block, eol) {
 }
 
 /**
- * Bring a target document in line with its source, following XLF Editor's rules:
- *   new in source      -> appended with <target state="needs-translation"></target>
- *   source text changed -> source replaced, target cleared, state needs-translation
- *   gone from source   -> removed
- *   note changed       -> note copied from source (Developer, and Xliff Generator)
+ * Bring a target document in line with its source:
+ *   new in source       -> appended, with an empty target in `stateEmpty`
+ *   source text changed -> source replaced; the old target is kept for the
+ *                          translator and flagged `stateReview` (onSourceChange
+ *                          "review"), or emptied into `stateEmpty` ("clear")
+ *   gone from source    -> removed
+ *   note changed        -> copied from source (Developer, and Xliff Generator)
  * Existing units keep their place and new ones are appended, unless `reorder` puts
- * every unit in source order (XLF Editor's "fix the sequence"). Targets kept in
- * another order would otherwise be rewritten end to end on the first sync.
- * Returns the new doc and a change log.
+ * every unit in source order: a target stored in another order would otherwise be
+ * rewritten end to end. Returns the new doc and a change log.
  */
-export function syncDocs(source, target, { stateEmpty = STATE_EMPTY, reorder = false } = {}) {
+export function syncDocs(source, target, {
+  stateEmpty = 'needs-translation', stateReview = 'needs-review-translation',
+  onSourceChange = 'review', reorder = false,
+} = {}) {
   const changes = { added: [], sourceChanged: [], removed: [], notesUpdated: [], duplicates: [], reordered: false };
   const byId = new Map();
   for (const u of target.units) {
@@ -206,16 +246,20 @@ export function syncDocs(source, target, { stateEmpty = STATE_EMPTY, reorder = f
   for (const s of source.units) {
     const t = byId.get(s.id);
     if (!t) {
-      const block = setTarget(withEol(stripTarget(s.block), target.eol), '', stateEmpty, target.eol);
-      added.push(parseUnit(block));
-      synced.set(s.id, added[added.length - 1]);
+      const unit = parseUnit(setTarget(withEol(stripTarget(s.block), target.eol), '', stateEmpty, target.eol));
+      added.push(unit);
+      synced.set(s.id, unit);
       changes.added.push({ id: s.id, source: decode(s.source) });
       continue;
     }
     let block = t.block;
     if (sourceKey(s.source) !== sourceKey(t.source)) {
-      block = setTarget(setSource(block, s.source), '', stateEmpty, target.eol);
-      changes.sourceChanged.push({ id: s.id, from: decode(t.source), to: decode(s.source), droppedTarget: decode(t.target) });
+      block = setSource(block, s.source);
+      const keep = onSourceChange !== 'clear' && !isEmptyTarget(t);
+      block = keep ? restateTarget(block, stateReview) : setTarget(block, '', stateEmpty, target.eol);
+      changes.sourceChanged.push({
+        id: s.id, from: decode(t.source), to: decode(s.source), target: decode(t.target), kept: keep,
+      });
     }
     let notes = false;
     for (const [key, re] of [['devNote', DEV_NOTE_RE], ['genNote', GEN_NOTE_RE]]) {
@@ -240,10 +284,20 @@ export function syncDocs(source, target, { stateEmpty = STATE_EMPTY, reorder = f
     ? source.units.map((u) => synced.get(u.id))
     : [...keptOrder.map((id) => synced.get(id)), ...added];
   changes.duplicates = [...new Set(changes.duplicates)];
-
   return { doc: { ...target, units }, changes };
 }
 
-export function isEmptyTarget(u) {
-  return !u.hasTarget || decode(u.target).trim() === '';
+/**
+ * A new target document for `language`, built from the source: the same header
+ * with target-language set, and every unit given an empty target in `stateEmpty`.
+ */
+export function createTargetDoc(source, language, stateEmpty, path) {
+  const fileTag = /<file\b[^>]*>/;
+  const tag = source.prefix.match(fileTag)?.[0];
+  if (!tag) throw new Error(`${source.path}: no <file> element`);
+  const newTag = /\btarget-language="[^"]*"/.test(tag)
+    ? tag.replace(/\btarget-language="[^"]*"/, `target-language="${language}"`)
+    : tag.replace(/<file\b/, `<file target-language="${language}"`);
+  const units = source.units.map((u) => parseUnit(setTarget(stripTarget(u.block), '', stateEmpty, source.eol)));
+  return { ...source, path, prefix: source.prefix.replace(fileTag, newTag), targetLanguage: language, units };
 }
