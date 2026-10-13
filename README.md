@@ -281,6 +281,14 @@ Code and confirm with `claude mcp list`.
 
 Requires Node.js 18 or later. `XLF_MCP_VERBOSE=1` logs each call to stderr.
 
+## Acknowledgements
+
+The synchronization rules (which state a new or changed unit gets, what is
+removed, how notes are carried over, how matches are applied) follow the
+behavior of the [XLF Editor](https://marketplace.visualstudio.com/items?itemName=aar.xlf-editor)
+extension for Visual Studio Code by Anpilogov Artem. No code from that project
+is included; this is an independent implementation of the same rules.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
