@@ -6,7 +6,11 @@ with the compiler's output, reusing translations that already exist, adding new
 languages — and report what is left for a translator.
 
 No VS Code, AL tooling or translation service is needed: the server reads and
-writes `.xlf` files on disk, and nothing else.
+writes `.xlf` files on disk, and nothing else. It needs Node.js 18 or later; see
+[Install](#install).
+
+It is not a machine translator. New text comes from the agent calling it or from
+translations already in your files; the server keeps the files consistent.
 
 - [How BC translation files work](#how-bc-translation-files-work)
 - [Tools](#tools)
